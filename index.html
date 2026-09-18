@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>GridWise — LLM-Assisted Energy Optimization</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    .bar { transition: width 0.4s ease; }
+    .scroll-x { overflow-x: auto; }
+    pre { white-space: pre-wrap; word-break: break-word; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-900 min-h-screen">
+
+  <!-- Header -->
+  <header class="bg-slate-900 text-white">
+    <div class="max-w-6xl mx-auto px-6 py-5 flex items-center justify-between">
+      <div>
+        <h1 class="text-2xl font-bold tracking-tight">GridWise</h1>
+        <p class="text-slate-300 text-sm">LLM-Assisted 24-hour Energy Schedule Optimizer</p>
+      </div>
+      <div class="flex items-center gap-3">
+        <span id="healthDot" class="inline-block w-2.5 h-2.5 rounded-full bg-slate-500"></span>
+        <span id="healthText" class="text-sm text-slate-300">checking…</span>
+        <button id="pingBtn"
+          class="text-xs px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">Ping</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-6 py-8 space-y-6">
+
+    <!-- Controls -->
+    <section class="bg-white rounded-lg shadow p-5">
+      <div class="grid md:grid-cols-2 gap-5">
+
+        <!-- Left: sample case loader -->
+        <div>
+          <label class="block text-sm font-semibold mb-1">Sample case</label>
+          <div class="flex gap-2">
+            <select id="sampleSelect"
+              class="flex-1 border border-slate-300 rounded px-3 py-2 text-sm bg-white">
+              <option value="">— custom —</option>
+            </select>
+            <button id="loadSampleBtn"
+              class="px-4 py-2 rounded bg-slate-800 text-white text-sm hover:bg-slate-700">
+              Load
+            </button>
+          </div>
+          <p class="text-xs text-slate-500 mt-2">
+            Loads the <code class="bg-slate-100 px-1 rounded">input</code> from a public sample case
+            into the editor below.
+          </p>
+        </div>
+
+        <!-- Right: notes preview -->
+        <div>
+          <label class="block text-sm font-semibold mb-1">Operator notes (from selected case)</label>
+          <div id="notesPreview"
+            class="border border-slate-200 rounded p-3 bg-slate-50 text-sm h-24 overflow-auto">
+            <span class="text-slate-400">— no case loaded —</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- JSON editor + send -->
+      <div class="mt-5">
+        <div class="flex items-center justify-between mb-1">
+          <label for="payload" class="text-sm font-semibold">Request JSON</label>
+          <div class="flex gap-2">
+            <button id="formatBtn"
+              class="text-xs px-2 py-1 rounded bg-slate-200 hover:bg-slate-300">Format</button>
+            <button id="clearBtn"
+              class="text-xs px-2 py-1 rounded bg-slate-200 hover:bg-slate-300">Clear</button>
+          </div>
+        </div>
+        <textarea id="payload" rows="14"
+          class="w-full font-mono text-xs border border-slate-300 rounded p-3 bg-slate-50"
+          spellcheck="false"
+          placeholder='{"scenario_id": "...", "operator_notes": [...], ...}'></textarea>
+
+        <div class="mt-3 flex items-center gap-3">
+          <button id="sendBtn"
+            class="px-5 py-2 rounded bg-emerald-600 text-white font-semibold hover:bg-emerald-500">
+            ▶ Send to /optimize-energy
+          </button>
+          <span id="latency" class="text-sm text-slate-500"></span>
+          <span id="status" class="text-sm"></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Results -->
+    <section id="resultsSection" class="bg-white rounded-lg shadow p-5 hidden">
+      <h2 class="text-lg font-semibold mb-3">Result</h2>
+
+      <!-- Summary cards -->
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+        <div class="rounded bg-slate-100 p-3">
+          <div class="text-xs text-slate-500">Total grid</div>
+          <div id="mGrid" class="text-xl font-bold">—</div>
+          <div class="text-xs text-slate-500">kWh</div>
+        </div>
+        <div class="rounded bg-slate-100 p-3">
+          <div class="text-xs text-slate-500">Total cost</div>
+          <div id="mCost" class="text-xl font-bold">—</div>
+          <div class="text-xs text-slate-500">BDT</div>
+        </div>
+        <div class="rounded bg-slate-100 p-3">
+          <div class="text-xs text-slate-500">Peak grid</div>
+          <div id="mPeak" class="text-xl font-bold">—</div>
+          <div class="text-xs text-slate-500">kWh / hour</div>
+        </div>
+        <div class="rounded bg-slate-100 p-3">
+          <div class="text-xs text-slate-500">Notes interpreted</div>
+          <div id="mNotes" class="text-xl font-bold">—</div>
+          <div class="text-xs text-slate-500">directives</div>
+        </div>
+      </div>
+
+      <!-- 24-hour grid chart -->
+      <h3 class="text-sm font-semibold mb-2">Grid draw by hour (kWh)</h3>
+      <div id="gridChart" class="scroll-x bg-slate-50 rounded p-3"></div>
+
+      <!-- Directive interpretations -->
+      <h3 class="text-sm font-semibold mt-5 mb-2">Directives</h3>
+      <div id="directives" class="scroll-x"></div>
+
+      <!-- Raw response -->
+      <details class="mt-5">
+        <summary class="text-sm font-semibold cursor-pointer">Raw response</summary>
+        <pre id="rawResponse" class="mt-2 bg-slate-900 text-slate-100 text-xs rounded p-3"></pre>
+      </details>
+    </section>
+
+    <!-- Footer -->
+    <footer class="text-center text-xs text-slate-500 py-6">
+      GridWise · FastAPI + PuLP/CBC · <a href="/health" class="underline">/health</a>
+    </footer>
+  </main>
+
+  <script>
+    // ──────────────────────────────────────────────────────────
+    //  Embedded sample cases (so the UI works offline too).
+    //  These are taken verbatim from the public sample file.
+    // ──────────────────────────────────────────────────────────
+    const SAMPLE_CASES = [
+      {
+        id: "SAMPLE-01",
+        title: "Solar cleaning + distractor",
+        notes: [
+          "Clean the solar panels between 10 AM and noon so usable solar should be treated as roughly 25% of the forecast.",
+          "Reminder: the cafeteria microwave is broken — ignore this for scheduling."
+        ]
+      },
+      {
+        id: "SAMPLE-02",
+        title: "Battery charging maintenance",
+        notes: [
+          "Hold 50% of the battery capacity in reserve between 6 PM and 10 PM for evening peak support."
+        ]
+      },
+      {
+        id: "SAMPLE-03",
+        title: "Emergency reserve as percentage",
+        notes: [
+          "Keep at least 20% of battery capacity untouched from 18:00 to 22:00."
+        ]
+      },
+      {
+        id: "SAMPLE-04",
+        title: "No-discharge protection test",
+        notes: [
+          "Do not discharge the battery from 16:00 until 21:00."
+        ]
+      },
+      {
+        id: "SAMPLE-05",
+        title: "Temporary feeder grid cap",
+        notes: [
+          "Cap grid imports at 100 kWh per hour from 19:00 to 23:00 due to a feeder limit."
+        ]
+      },
+      {
+        id: "SAMPLE-06",
+        title: "Multiple notes with distractor",
+        notes: [
+          "Cut solar forecast in half between 11:00 and 15:00 — heavy cloud cover expected.",
+          "Schedule: PM meeting at 4 — unrelated."
+        ]
+      },
+      {
+        id: "SAMPLE-07",
+        title: "Reserve plus transformer cap",
+        notes: [
+          "Hold 30% battery reserve from 17:00 to 22:00.",
+          "Limit grid to 120 kWh/h between 18:00 and 23:00."
+        ]
+      },
+      {
+        id: "SAMPLE-08",
+        title: "Separate charge/discharge outages",
+        notes: [
+          "Do not charge battery from 12:00 to 14:00.",
+          "Do not discharge battery from 18:00 to 21:00."
+        ]
+      },
+      {
+        id: "SAMPLE-09",
+        title: "Reduction wording normalization",
+        notes: [
+          "Reduce usable solar to about half of the forecast from 09:00 to 17:00."
+        ]
+      },
+      {
+        id: "SAMPLE-10",
+        title: "Multi-constraint evening operation",
+        notes: [
+          "Treat solar as roughly 40% of forecast from 16:00 to 20:00.",
+          "Hold 25% battery reserve from 17:00 to 22:00.",
+          "Cap grid at 150 kWh/h from 18:00 to 23:00."
+        ]
+      }
+    ];
+
+    // ──────────────────────────────────────────────────────────
+    //  Default scenario template (mirrors BUP_CSE_FEST_2026_Preli sample shape).
+    //  When the user picks "— custom —" they edit this directly.
+    // ──────────────────────────────────────────────────────────
+    const BASE_HOUR = (h) => ({
+      hour: h,
+      demand_kwh: 100,
+      solar_kwh: 0,
+      tariff_bdt_per_kwh: 8
+    });
+    function defaultScenario() {
+      const hours = [];
+      for (let h = 0; h < 24; h++) {
+        const hour = BASE_HOUR(h);
+        // Toy day shape so the solver has something to do.
+        hour.demand_kwh = 60 + 30 * Math.sin((h - 6) / 24 * Math.PI * 2);
+        hour.solar_kwh = h >= 8 && h <= 17 ? Math.max(0, 90 * Math.sin((h - 8) / 10 * Math.PI)) : 0;
+        hour.tariff_bdt_per_kwh = (h >= 18 && h <= 22) ? 18 : 8;
+        hours.push(hour);
+      }
+      return {
+        scenario_id: "CUSTOM-01",
+        battery: {
+          capacity_kwh: 200,
+          initial_energy_kwh: 100,
+          minimum_energy_kwh: 0,
+          max_charge_kwh_per_hour: 50,
+          max_discharge_kwh_per_hour: 50
+        },
+        hours: hours,
+        operator_notes: []
+      };
+    }
+
+    // ──────────────────────────────────────────────────────────
+    //  Helpers
+    // ──────────────────────────────────────────────────────────
+    const $ = (id) => document.getElementById(id);
+    const payloadEl = $("payload");
+
+    function pretty(obj) {
+      return JSON.stringify(obj, null, 2);
+    }
+
+    async function api(path, opts = {}) {
+      const r = await fetch(path, opts);
+      const text = await r.text();
+      let body; try { body = JSON.parse(text); } catch { body = text; }
+      return { status: r.status, body };
+    }
+
+    function renderNotes(notes) {
+      const box = $("notesPreview");
+      if (!notes || !notes.length) {
+        box.innerHTML = '<span class="text-slate-400">— no notes —</span>';
+        return;
+      }
+      box.innerHTML = notes.map((n, i) =>
+        `<div class="mb-1"><span class="text-slate-400 mr-2">${i+1}.</span>${escapeHtml(n)}</div>`
+      ).join("");
+    }
+
+    function escapeHtml(s) {
+      return s.replace(/[&<>"']/g, c => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      })[c]);
+    }
+
+    function buildSampleInput(caseId) {
+      // Pull the rich input from the public sample JSON if the user has it
+      // served; otherwise fall back to a hand-built minimal scenario.
+      return fetch(`/sample/${caseId}.json`).catch(() => null);
+    }
+
+    async function loadSampleCase(caseId) {
+      // We try to fetch the rich input from the API first; if the server
+      // doesn't expose /sample we build a minimal scenario with just the notes.
+      try {
+        const r = await fetch(`/static/BUP_CSE_FEST_2026_Preli_Public_Sample_Cases.json`);
+        if (r.ok) {
+          const pack = await r.json();
+          const match = pack.cases.find(c => c.id === caseId);
+          if (match && match.input) {
+            payloadEl.value = pretty(match.input);
+            renderNotes(match.input.operator_notes || []);
+            return;
+          }
+        }
+      } catch {}
+      // Fallback: minimal scenario with just notes.
+      const meta = SAMPLE_CASES.find(c => c.id === caseId);
+      if (!meta) return;
+      const sc = defaultScenario();
+      sc.scenario_id = caseId;
+      sc.operator_notes = meta.notes;
+      payloadEl.value = pretty(sc);
+      renderNotes(meta.notes);
+    }
+
+    function renderResult(resp) {
+      $("resultsSection").classList.remove("hidden");
+      $("mGrid").textContent = resp.total_grid_kwh.toFixed(2);
+      $("mCost").textContent = resp.total_cost_bdt.toFixed(2);
+      $("mPeak").textContent = resp.peak_grid_kwh.toFixed(2);
+      $("mNotes").textContent = resp.directive_interpretation.length;
+
+      // 24-hour grid chart
+      const max = Math.max(...resp.hourly_plan.map(r => r.grid_kwh), 1);
+      $("gridChart").innerHTML =
+        '<div class="flex gap-1 items-end" style="min-width:720px;height:160px">' +
+        resp.hourly_plan.map(r => {
+          const pct = (r.grid_kwh / max) * 100;
+          return `<div class="flex-1 flex flex-col items-center">
+            <div class="w-full bg-emerald-500 bar rounded-t" style="height:${pct.toFixed(1)}%" title="h=${r.hour}: ${r.grid_kwh.toFixed(2)} kWh"></div>
+            <div class="text-[10px] text-slate-500 mt-1">${r.hour}</div>
+          </div>`;
+        }).join("") +
+        "</div>";
+
+      // Directives
+      $("directives").innerHTML = resp.directive_interpretation.length
+        ? `<table class="w-full text-xs">
+            <thead class="bg-slate-100">
+              <tr><th class="px-2 py-1 text-left">#</th><th class="px-2 py-1 text-left">Type</th>
+                  <th class="px-2 py-1 text-left">Detail</th></tr>
+            </thead>
+            <tbody>
+              ${resp.directive_interpretation.map((d, i) => `
+                <tr class="border-t">
+                  <td class="px-2 py-1">${i+1}</td>
+                  <td class="px-2 py-1 font-mono">${d.directive_type}</td>
+                  <td class="px-2 py-1 font-mono text-slate-600">${escapeHtml(JSON.stringify({hours:d.hours, factor:d.factor, max_grid_kwh:d.max_grid_kwh, minimum_energy_kwh:d.minimum_energy_kwh}))}</td>
+                </tr>`).join("")}
+            </tbody>
+          </table>`
+        : '<p class="text-sm text-slate-500">No directives (pass-through).</p>';
+
+      $("rawResponse").textContent = pretty(resp);
+    }
+
+    // ──────────────────────────────────────────────────────────
+    //  Wire up
+    // ──────────────────────────────────────────────────────────
+    payloadEl.value = pretty(defaultScenario());
+
+    const sel = $("sampleSelect");
+    SAMPLE_CASES.forEach(c => {
+      const opt = document.createElement("option");
+      opt.value = c.id;
+      opt.textContent = `${c.id} — ${c.title}`;
+      sel.appendChild(opt);
+    });
+
+    $("loadSampleBtn").onclick = () => {
+      const id = sel.value;
+      if (!id) return;
+      loadSampleCase(id);
+    };
+
+    $("formatBtn").onclick = () => {
+      try { payloadEl.value = pretty(JSON.parse(payloadEl.value)); }
+      catch { alert("Invalid JSON — cannot format."); }
+    };
+
+    $("clearBtn").onclick = () => {
+      payloadEl.value = pretty(defaultScenario());
+      renderNotes([]);
+    };
+
+    $("sendBtn").onclick = async () => {
+      const status = $("status");
+      const lat = $("latency");
+      status.textContent = ""; lat.textContent = "sending…";
+      let parsed;
+      try { parsed = JSON.parse(payloadEl.value); }
+      catch { status.textContent = "❌ Invalid JSON"; status.className = "text-sm text-red-600"; return; }
+
+      const t0 = performance.now();
+      try {
+        const { status: code, body } = await api("/optimize-energy", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(parsed)
+        });
+        const ms = (performance.now() - t0).toFixed(0);
+        lat.textContent = `${code} · ${ms} ms`;
+        if (code === 200) {
+          status.textContent = "✓ solved";
+          status.className = "text-sm text-emerald-600";
+          renderResult(body);
+        } else {
+          status.textContent = `❌ ${body.error || code}`;
+          status.className = "text-sm text-red-600";
+          $("rawResponse").textContent = pretty(body);
+          $("resultsSection").classList.remove("hidden");
+        }
+      } catch (e) {
+        status.textContent = "❌ " + e.message;
+        status.className = "text-sm text-red-600";
+      }
+    };
+
+    async function ping() {
+      try {
+        const { status, body } = await api("/health");
+        if (status === 200 && body.status === "ok") {
+          $("healthDot").className = "inline-block w-2.5 h-2.5 rounded-full bg-emerald-500";
+          $("healthText").textContent = "healthy";
+        } else throw new Error("bad status");
+      } catch {
+        $("healthDot").className = "inline-block w-2.5 h-2.5 rounded-full bg-red-500";
+        $("healthText").textContent = "unreachable";
+      }
+    }
+    $("pingBtn").onclick = ping;
+    ping();
+  </script>
+</body>
+</html>

@@ -9,7 +9,8 @@ from typing import Any, Dict
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
 from .guardrail import GuardrailError, validate_interpretations
@@ -222,3 +223,46 @@ def _finalize_plan(rows: list) -> list:
             )
         )
     return out
+
+
+# ---------------------------------------------------------------------------
+# Frontend (single-page UI served from the repo root)
+# ---------------------------------------------------------------------------
+import os
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_INDEX_HTML = _REPO_ROOT / "index.html"
+
+# Serve sibling assets (css/js/images) if you ever add them
+if _REPO_ROOT.is_dir():
+    app.mount(
+        "/static",
+        StaticFiles(directory=str(_REPO_ROOT), html=False),
+        name="static",
+    )
+
+
+@app.get("/", include_in_schema=False)
+def root_index() -> Any:
+    """Serve the bundled frontend at /."""
+    if _INDEX_HTML.is_file():
+        return FileResponse(str(_INDEX_HTML), media_type="text/html")
+    return JSONResponse(
+        status_code=404,
+        content={"error": "frontend_not_found", "message": "index.html missing"},
+    )
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> Any:
+    """Silences browser favicon probes that would otherwise show as
+    'Invalid HTTP request' in uvicorn logs."""
+    tiny_png = bytes.fromhex(
+        "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4"
+        "890000000a49444154789c6300010000000500010d0a2db40000000049454e44"
+        "ae426082"
+    )
+    from fastapi.responses import Response
+
+    return Response(content=tiny_png, media_type="image/png")
