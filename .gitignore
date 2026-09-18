@@ -1,0 +1,62 @@
+# ─────────────────────────────────────────────────────────────
+# GridWise -- Git ignore rules
+# ─────────────────────────────────────────────────────────────
+
+# ── Python ──
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+*.egg
+
+# ── Virtual environments ──
+.venv/
+venv/
+env/
+ENV/
+
+# ── IDE / editor configs ──
+.idea/
+.vscode/
+.pku/
+.puku/
+*.swp
+*.swo
+*~
+
+# ── Environment / secrets (never commit) ──
+.env
+.env.*
+!.env.example
+
+# ── OS / filesystem clutter ──
+.DS_Store
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# ── Logs and runtime artifacts ──
+*.log
+*.pid
+*.seed
+.coverage
+htmlcov/
+.tox/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ── Build / distribution ──
+build/
+dist/
+node_modules/
+
+# ── Project-specific noise ──
+# Bundled PDFs and judge-only docs that shouldn't live in the source tree
+*.pdf
+!docs/*.pdf
+
+# Local cases harness scratch (if you ever add one)
+.cases_cache/
